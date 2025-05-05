@@ -1,0 +1,37 @@
+SonarQube plugins:
+  - Python Code Quality and Security 3.4.1.8066 (python)
+  - CSS Code Quality and Security 1.4.2.2002 (cssfamily)
+  - Go Code Quality and Security 1.8.3.2219 (go)
+  - JaCoCo 1.1.1.1157 (jacoco)
+  - Kotlin Code Quality and Security 1.8.3.2219 (kotlin)
+  - JavaScript/TypeScript Code Quality and Security 7.4.4.15624 (javascript)
+  - Ruby Code Quality and Security 1.8.3.2219 (ruby)
+  - Scala Code Quality and Security 1.8.3.2219 (sonarscala)
+  - C# Code Quality and Security 8.22.0.31243 (csharp)
+  - Java Code Quality and Security 6.15.1.26025 (java)
+  - HTML Code Quality and Security 3.4.0.2754 (web)
+  - Flex Code Quality and Security 2.6.1.2564 (flex)
+  - XML Code Quality and Security 2.2.0.2973 (xml)
+  - PHP Code Quality and Security 3.17.0.7439 (php)
+  - VB.NET Code Quality and Security 8.22.0.31243 (vbnet)
+Global server settings:
+  - sonar.core.id=BF41A1F2-AXpET617ne-fwHtoU9Uz
+  - sonar.core.startTime=2021-08-25T12:17:07+0700
+  - sonar.forceAuthentication=true
+Project server settings:
+Project scanner properties:
+  - sonar.cpd.php.minimumLines=100
+  - sonar.cpd.php.minimumtokens=1000
+  - sonar.exclusions=requirements.php, nbproject/**, vagrant/**, vendor/**, web/**
+  - sonar.host.url=https://sonarqube.vfiengineering.com
+  - sonar.login=******
+  - sonar.projectBaseDir=C:\Work\VBox\Shared\hostSimulator
+  - sonar.projectKey=host-simulator
+  - sonar.projectName=Host Simulator
+  - sonar.scanner.app=ScannerCLI
+  - sonar.scanner.appVersion=4.6.2.2472
+  - sonar.scm.disabled=True
+  - sonar.sourceEncoding=windows-1252
+  - sonar.sources=.
+  - sonar.verbose=true
+  - sonar.working.directory=C:\Work\VBox\Shared\hostSimulator\.scannerwork

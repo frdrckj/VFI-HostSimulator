@@ -1,0 +1,6 @@
+projectKey=host-simulator
+serverUrl=https://sonarqube.vfiengineering.com
+serverVersion=8.9.1.44547
+dashboardUrl=https://sonarqube.vfiengineering.com/dashboard?id=host-simulator
+ceTaskId=AX3CHlBDy6-NHX3Ns50V
+ceTaskUrl=https://sonarqube.vfiengineering.com/api/ce/task?id=AX3CHlBDy6-NHX3Ns50V

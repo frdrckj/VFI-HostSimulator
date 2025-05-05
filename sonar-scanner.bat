@@ -1,0 +1,2 @@
+@echo off
+cmd /k C:\sonar-scanner\bin\sonar-scanner.bat -X -D"sonar.projectName=Host Simulator" -D"sonar.projectKey=host-simulator" -D"sonar.login=9e507ec2af94168b699707b4f99d5ecd71ff517c" -D"sonar.sources=." -D"sonar.host.url=https://sonarqube.vfiengineering.com" -D"sonar.exclusions=requirements.php, nbproject/**, vagrant/**, vendor/**, web/**" -D"sonar.cpd.php.minimumtokens=1000" -D"sonar.cpd.php.minimumLines=100" -D"sonar.scm.disabled=True" -D"sonar.sourceEncoding=UTF-8"

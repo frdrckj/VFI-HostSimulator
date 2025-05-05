@@ -1,0 +1,296 @@
+<?php
+
+namespace app\commands;
+
+use Andromeda\ISO8583\Parser;
+use app\components\BriHelper;
+use app\components\CimbHelper;
+use app\components\Iso8583Definition;
+use app\components\VfiHelper;
+use app\models\Host;
+use app\models\Isomsg;
+use app\models\Isotrx;
+use app\models\Log;
+use app\models\Record;
+use yii\console\Controller;
+
+class Iso8583Controller extends Controller {
+
+    private function featureProcess($isoReq, $isoRsp, $feature, $bit, $def) {
+        switch ($feature) {
+            case '1':
+                $cimb = new CimbHelper();
+                $data = $cimb->qrisMpmCreate($isoReq, $isoRsp, $bit);
+                break;
+            case '2':
+                $cimb = new CimbHelper();
+                $data = $cimb->qrisMpmCheck($isoReq, $isoRsp, $bit);
+                break;
+            case '3':
+                $cimb = new CimbHelper();
+                $data = $cimb->qrisMpmRefund($isoReq, $isoRsp, $bit);
+                break;
+            case '4':
+                $bri = new BriHelper();
+                $data = $bri->qrisMpmCreate($isoReq, $isoRsp, $bit);
+                break;
+            case '5':
+                $bri = new BriHelper();
+                $data = $bri->qrisMpmCheck($isoReq, $isoRsp, $bit);
+                break;
+            case '6':
+                $bri = new BriHelper();
+                $data = $bri->qrisMpmRefund($isoReq, $isoRsp, $bit);
+                break;
+            case '7':
+                $vfi = new VfiHelper();
+                $data = $vfi->increaseBalance($isoReq, $isoRsp, $bit);
+                break;
+            case '8':
+                $vfi = new VfiHelper();
+                $data = $vfi->decreaseBalance($isoReq, $isoRsp, $bit);
+                break;
+            case '9':
+                $vfi = new VfiHelper();
+                $data = $vfi->checkBalance($isoReq, $isoRsp, $bit);
+                break;
+            case '10':
+                $vfi = new VfiHelper();
+                $data = $vfi->checkPln($isoReq, $isoRsp, $bit);
+                break;
+            case '11':
+                $vfi = new VfiHelper();
+                $data = $vfi->payPln($isoReq, $isoRsp, $bit);
+                break;
+            default:
+                $data = null;
+        }
+        if ((($def[0] == 'ns') || ($def[0] == 'a') || ($def[0] == 'an') || ($def[0] == 'ans')) && ($def[2]) && ($data)) {
+            $retVal = bin2hex($data);
+        } else {
+            $retVal = $data;
+        }
+        return $retVal;
+    }
+
+    private function sistemProcess($bit, $def) {
+        switch ($bit) {
+            case 10:
+                $data = date('mdHis');
+                break;
+            case 12:
+                $data = date('His');
+                break;
+            case 13:
+            case 15:
+            case 16:
+            case 17:
+                $data = date('md');
+                break;
+            case 19:
+            case 20:
+            case 21:
+                $data = '360';
+                break;
+            case 37:
+            case 38:
+            case 39:
+                $data = random_int(pow(10, $def[1] - 1), pow(10, $def[1]) - 1);
+                break;
+            default:
+                $data = null;
+        }
+        if ((($def[0] == 'ns') || ($def[0] == 'a') || ($def[0] == 'an') || ($def[0] == 'ans')) && ($def[2]) && ($data)) {
+            $retVal = bin2hex($data);
+        } else {
+            $retVal = $data;
+        }
+        return $retVal;
+    }
+
+    public function actionProcess($isoReq, $dtIn) { //NOSONAR
+        $messageDefinition = new Iso8583Definition();
+        $len = substr($isoReq, 0, 4);
+        $tpdu = substr($isoReq, 4, 10);
+        $data = substr($isoReq, 14);
+        if ((base_convert($len, 16, 10) * 2) != (strlen($data) + 10)) {
+            //Length not valid
+            echo '000';
+            $logKeterangan = 'INVALID LENGTH';
+            goto LOG_DATABASE; //NOSONAR
+        }
+
+        $isoParse = new Parser($messageDefinition);
+        $isoParse->addMessage($data);
+        if (!$isoParse->validateISO()) {
+            //Iso not valid
+            echo '000';
+            $logKeterangan = 'INVALID ISO8583';
+            goto LOG_DATABASE; //NOSONAR
+        }
+
+        $query = Host::find()->where(['host_nii' => $tpdu]);
+        $nii = $isoParse->getBit('24');
+        if ($nii) {
+            $query->orWhere(['host_nii' => $nii]);
+        }
+        $host = $query->one();
+        if (!($host instanceof Host)) {
+            //No host route found
+            echo '000';
+            $logKeterangan = 'INVALID HOST';
+            goto LOG_DATABASE; //NOSONAR
+        }
+        if ($host->host_reply == '0') {
+            //Config host to not reply
+            echo '000';
+            $logKeterangan = 'CONFIG HOST TO NOT REPLY';
+            goto LOG_DATABASE; //NOSONAR
+        }
+
+        $mti = $isoParse->getMTI();
+        $procCode = $isoParse->getBit('3');
+        $isotrx = Isotrx::find()->where(['isotrx_host_id' => $host->host_id, 'isotrx_msg_type' => $mti, 'isotrx_proc_code' => $procCode])->one();
+        if (!($isotrx instanceof Isotrx)) {
+            //No trx route found
+            echo '000';
+            $logKeterangan = 'INVALID TRANSACTION';
+            goto LOG_DATABASE; //NOSONAR
+        }
+
+        $logKeterangan = $isotrx->isotrx_name;
+        $logAction = $host->host_name;
+        $recordFlag = true;
+
+        $isoPack = new Parser($messageDefinition);
+        $isoPack->addMTI(sprintf('%04d', intval($mti) + 10));
+        $isomsg = Isomsg::find()->where(['isomsg_isotrx_id' => $isotrx->isotrx_id])->all();
+        foreach ($isomsg as $bitmap) {
+            $tmp = $isoParse->getBit($bitmap->isomsg_bit);
+            if (($bitmap->isomsg_reply_exist == '0') || ($bitmap->isomsg_reply_exist == '1' && $tmp)) {
+                if ($bitmap->isomsg_same == '1') {
+                    if ($tmp) {
+                        $isoPack->addBit($bitmap->isomsg_bit, $tmp);
+                    }
+                } else if ($bitmap->isomsg_random == '1') {
+                    $bit = intval($bitmap->isomsg_bit);
+                    if ($bitmap->isomsg_feature) {
+                        $tmp = $this->featureProcess($isoParse, $isoPack, $bitmap->isomsg_feature, $bit, $messageDefinition->getIso()[$bit]);
+                    } else {
+                        $tmp = $this->sistemProcess($bit, $messageDefinition->getIso()[$bit]);
+                    }
+                    if ($tmp) {
+                        $isoPack->addBit($bitmap->isomsg_bit, $tmp);
+                    }
+                } else {
+                    if ($bitmap->isomsg_data) {
+                        if ($bitmap->isomsg_hexa == '1') {
+                            $isoPack->addBit($bitmap->isomsg_bit, hex2bin($bitmap->isomsg_data));
+                        } else {
+                            $isoPack->addBit($bitmap->isomsg_bit, $bitmap->isomsg_data);
+                        }
+                    }
+                }
+            }
+        }
+
+        $data = $isoPack->getISO();
+        $len = strtoupper(sprintf('%04s', base_convert((strlen($data) + 10) / 2, 10, 16)));
+        $isoRsp = $len . substr($tpdu, 0, 2) . substr($tpdu, 6, 4) . substr($tpdu, 2, 4) . $data;
+        echo 'OKE' . $isoRsp;
+
+        LOG_DATABASE:
+        $log = new Log();
+        $log->request = $isoReq;
+        $log->response = isset($isoRsp) ? $isoRsp : '';
+        $log->keterangan_log = isset($logKeterangan) ? $logKeterangan : '';
+        $log->action = isset($logAction) ? $logAction : '';
+        $log->date_time_in = $dtIn;
+        $log->date_time_out = date('Y-m-d H:i:s');
+        $log->log_bulan = date('n');
+        $log->log_tahun = date('Y');
+        $log->save();
+
+        if (isset($recordFlag)) {
+            $record = new Record();
+            $record->record_host_id = $host->host_id;
+            $record->record_isotrx_id = $isotrx->isotrx_id;
+            $record->record_msg_type = $isoParse->getMTI();
+            $record->record_proc_code = $isoParse->getBit('3');
+            $tmp = $isoParse->getBit('41');
+            if ($tmp) {
+                $record->record_tid = $tmp;
+            }
+            $tmp = $isoParse->getBit('42');
+            if ($tmp) {
+                $record->record_mid = $tmp;
+            }
+            $tmp = $isoPack->getBit('4');
+            if ($tmp) {
+                $total = intval($tmp);
+            } else {
+                $total = 0;
+            }
+            $tmp = substr($isoPack->getBit('54'), 4);
+            if ($tmp) {
+                $add = intval(hex2bin($tmp));
+            } else {
+                $tmp = substr($isoParse->getBit('54'), 4);
+                if ($tmp) {
+                    $add = intval(hex2bin($tmp));
+                } else {
+                    $add = 0;
+                }
+            }
+            $record->record_base_amount = $total - $add;
+            $record->record_add_amount = $add;
+            $record->record_total_amount = $total;
+            $record->record_data = "<b>Request:</b><br>" . $isoReq . "<br>";
+            for ($bit = 1; $bit <= 64; $bit += 1) {
+                $tmp = $isoParse->getBit(strval($bit));
+                if ($tmp) {
+                    $record->record_data .= ("Bit " . $bit . ": " . $tmp . "<br>");
+                }
+            }
+            $record->record_data = substr($record->record_data, 0, -1);
+            if (isset($isoRsp)) {
+                $isoPack->addMessage(substr($isoRsp, 14));
+                $record->record_data .= ("<br><br><b>Response:</b><br>" . $isoRsp . "<br>");
+                for ($bit = 1; $bit <= 64; $bit += 1) {
+                    $tmp = $isoPack->getBit(strval($bit));
+                    if ($tmp) {
+                        $record->record_data .= ("Bit " . $bit . ": " . $tmp . "<br>");
+                    }
+                }
+                $record->record_data = substr($record->record_data, 0, -1);
+            }
+            $record->save();
+        }
+    }
+
+    public function actionTest($data, $pack = null) {
+        $messageDefinition = new Iso8583Definition();
+        $isoParse = new Parser($messageDefinition);
+        $isoPack = new Parser($messageDefinition);
+
+        $isoParse->addMessage($data);
+        $mti = $isoParse->getMTI();
+        var_dump('MTI: ' . $mti);
+        if ($pack) {
+            $isoPack->addMTI($mti);
+        }
+        for ($bit = 1; $bit <= 64; $bit += 1) {
+            $tmp = $isoParse->getBit(strval($bit));
+            if ($tmp) {
+                var_dump('Bit ' . $bit . ': ' . $tmp);
+                if ($pack) {
+                    $isoPack->addBit(strval($bit), $tmp);
+                }
+            }
+        }
+        if ($pack) {
+            var_dump($isoPack->getISO());
+        }
+    }
+
+}

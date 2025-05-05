@@ -1,0 +1,198 @@
+<?php
+
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+namespace app\components;
+
+use app\models\QrisCimb;
+use yii\db\Expression;
+
+/**
+ * Description of CimbHelper
+ *
+ * @author SinggihA1
+ */
+class CimbHelper {
+
+    public function apiQrProcess($qrTag, $pay) {
+        $tag62 = UtilsHelper::parseQrString($qrTag['62']);
+        if (isset($tag62['05'])) {
+            $qris = QrisCimb::find()->where(['qris_id' => intval($tag62['05'])])->one();
+            if ($qris instanceof QrisCimb) {
+                if ($qris->qris_approval_code) {
+                    return [3, null];
+                } else {
+                    $data = [
+                        'trxDateTime' => $qris->qris_trx_dt,
+                        'baseAmount' => $qris->qris_base_amount,
+                        'addAmount' => $qris->qris_add_amount,
+                        'totalAmount' => $qris->qris_total_amount
+                    ];
+                    if ($pay) {
+                        $qris->qris_approval_dt = date('Y-m-d H:i:s');
+                        $qris->qris_approval_code = (string) random_int(pow(10, 5), pow(10, 6) - 1);
+                        if (!$qris->save()) {
+                            return [4, null];
+                        }
+                        $data['payDateTime'] = $qris->qris_approval_dt;
+                        $data['approvalCode'] = $qris->qris_approval_code;
+                    }
+                    return [0, $data];
+                }
+            } else {
+                return [2, null];
+            }
+        }
+        return [1, null];
+    }
+
+    private function getAmount($isoBit4, $isoBit54) {
+        if ($isoBit4) {
+            $total = intval($isoBit4) / 100;
+        } else {
+            $total = 0;
+        }
+        if ($isoBit54) {
+            $add = intval(hex2bin($isoBit54)) / 100;
+        } else {
+            $add = 0;
+        }
+        return [$add, $total];
+    }
+
+    private function getDateTime($isoDate, $isoTime) {
+        return date('Y') . '-' . substr($isoDate, 0, 2) . '-' . substr($isoDate, 2, 2) . ' ' . substr($isoTime, 0, 2) . ':' . substr($isoTime, 2, 2) . ':' . substr($isoTime, 4, 2);
+    }
+
+    public function qrisMpmCreate($isoReq, $isoRsp, $bit) {
+        switch ($bit) {
+            case 39:
+                $qris = new QrisCimb();
+                $qris->qris_trx_dt = $this->getDateTime($isoRsp->getBit('13'), $isoRsp->getBit('12'));
+                $qris->qris_org_rrn = hex2bin($isoRsp->getBit('37'));
+                $amount = $this->getAmount($isoReq->getBit('4'), $isoReq->getBit('54'));
+                $qris->qris_base_amount = $amount[1] - $amount[0];
+                $qris->qris_add_amount = $amount[0];
+                $qris->qris_total_amount = $amount[1];
+                if ($qris->save()) {
+                    $data = '00';
+                } else {
+                    $data = '96';
+                }
+                break;
+            case 63:
+                $qris = QrisCimb::find()->where(['qris_trx_dt' => $this->getDateTime($isoRsp->getBit('13'), $isoRsp->getBit('12'))])->one();
+                if ($qris instanceof QrisCimb) {
+                    $data = '000201010212041553919900020420526710019ID.CO.CIMBNIAGA.WWW011893600022000016305402150000081585000060303UME51450015ID.OR.QRNPG.WWW0215ID10200285190610303UME52045812530336054';
+                    $amount = strval($qris->qris_total_amount);
+                    $data .= (sprintf('%02d', strlen($amount)) . $amount);
+                    $data .= ('5802ID5918VERIFONE INDONESIA6007JAKARTA61051022062220506' . sprintf('%06d', $qris->qris_id) . '0708' . sprintf('%08s', $isoReq->getBit('41')) . '6304');
+                    $data .= (UtilsHelper::CRC16Normal($data));
+                } else {
+                    $data = null;
+                }
+                break;
+            default:
+                $data = null;
+        }
+        return $data;
+    }
+
+    public function qrisMpmCheck($isoReq, $isoRsp, $bit) {
+        switch ($bit) {
+            case 4:
+                $qris = QrisCimb::find()->where(['and',
+                                ['qris_id' => intval(hex2bin($isoReq->getBit('63')))],
+                                ['IS NOT', 'qris_approval_code', new Expression('NULL')]
+                        ])->one();
+                if ($qris instanceof QrisCimb) {
+                    $data = sprintf('%010d', ($qris->qris_total_amount * 100));
+                } else {
+                    $data = '000000000000';
+                }
+                break;
+            case 39:
+                $qris = QrisCimb::find()->where(['and',
+                                ['qris_id' => intval(hex2bin($isoReq->getBit('63')))],
+                                ['IS NOT', 'qris_approval_code', new Expression('NULL')]
+                        ])->one();
+                if ($qris instanceof QrisCimb) {
+                    $data = '00';
+                } else {
+                    $data = '78';
+                }
+                break;
+            case 54:
+                $qris = QrisCimb::find()->where(['and',
+                                ['qris_id' => intval(hex2bin($isoReq->getBit('63')))],
+                                ['IS NOT', 'qris_approval_code', new Expression('NULL')]
+                        ])->one();
+                if ($qris instanceof QrisCimb) {
+                    if ($qris->qris_add_amount > 0) {
+                        $data = sprintf('%010d', ($qris->qris_add_amount * 100));
+                    } else {
+                        $data = null;
+                    }
+                } else {
+                    $data = null;
+                }
+                break;
+            case 63:
+                $qris = QrisCimb::find()->where(['and',
+                                ['qris_id' => intval(hex2bin($isoReq->getBit('63')))],
+                                ['IS NOT', 'qris_approval_code', new Expression('NULL')]
+                        ])->one();
+                if ($qris instanceof QrisCimb) {
+                    $data = sprintf('%06d', $qris->qris_id) . substr($qris->qris_approval_dt, 8, 2) . substr($qris->qris_approval_dt, 5, 2) . substr($qris->qris_approval_dt, 11, 2) . substr($qris->qris_approval_dt, 14, 2) . substr($qris->qris_approval_dt, 17, 2) . sprintf('%06s', $qris->qris_approval_code) . str_pad($qris->qris_org_rrn, 20, " ");
+                    $data .= ('REKPON/E-WALLET     936000220000000034200093600022BOGEL GANTENG                 00000008**********0Bank CIMB Niaga                                                       ');
+                } else {
+                    $data = null;
+                }
+                break;
+            default:
+                $data = null;
+        }
+        return $data;
+    }
+
+    public function qrisMpmRefund($isoReq, $isoRsp, $bit) {
+        switch ($bit) {
+            case 39:
+                $amount = $this->getAmount($isoReq->getBit('4'), $isoReq->getBit('54'));
+                $qris = QrisCimb::find()->where(['and',
+                                ['qris_id' => intval(hex2bin($isoReq->getBit('63')))],
+                                ['IS NOT', 'qris_approval_code', new Expression('NULL')],
+                                ['qris_total_amount' => $amount[1]]
+                        ])->one();
+                if ($qris instanceof QrisCimb) {
+                    $data = '00';
+                } else {
+                    $data = '78';
+                }
+                break;
+            case 63:
+                $amount = $this->getAmount($isoReq->getBit('4'), $isoReq->getBit('54'));
+                $qris = QrisCimb::find()->where(['and',
+                                ['qris_id' => intval(hex2bin($isoReq->getBit('63')))],
+                                ['IS NOT', 'qris_approval_code', new Expression('NULL')],
+                                ['qris_total_amount' => $amount[1]]
+                        ])->one();
+                if ($qris instanceof QrisCimb) {
+                    $data = sprintf('%06d', $qris->qris_id) . substr($qris->qris_approval_dt, 8, 2) . substr($qris->qris_approval_dt, 5, 2) . substr($qris->qris_approval_dt, 11, 2) . substr($qris->qris_approval_dt, 14, 2) . substr($qris->qris_approval_dt, 17, 2) . sprintf('%06s', $qris->qris_approval_code) . sprintf('%012s', hex2bin($isoRsp->getBit('37')));
+                    $data .= ('9360002200000000342Bank CIMB Niaga               00000008**********0BOGEL GANTENG                 00093600022                   REKPON/E-WALLET     ');
+                    $qris->delete();
+                } else {
+                    $data = null;
+                }
+                break;
+            default:
+                $data = null;
+        }
+        return $data;
+    }
+
+}
