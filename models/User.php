@@ -35,7 +35,7 @@ class User extends ActiveRecord implements IdentityInterface {
     const SCENARIO_VALIDATE_UPDATE = 'validate update';
     const STATUS_INACTIVE = 0;
     const STATUS_ACTIVE = 10;
-    const COMPLEMENT = '@!Boteng2021%??';
+    const COMPLEMENT = '@!Boteng2021';
 
     public $changePwd = false;
 
